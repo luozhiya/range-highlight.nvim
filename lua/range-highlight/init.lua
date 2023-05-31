@@ -38,6 +38,7 @@ local opts, cache =
 			sort = true,
 		},
 	}, {}
+local timer = nil
 local mark_to_number = require("range-highlight.helper").mark_to_number
 local forward_search_to_number = require("range-highlight.helper").forward_search_to_number
 local backward_search_to_number = require("range-highlight.helper").backward_search_to_number
@@ -113,44 +114,64 @@ local function get_range_number(cmd)
 	return start_line, end_line
 end
 
-local function add_highlight()
-	local text = vim.fn.getcmdline()
+local function timer_close()
+	if timer then
+		timer:close()
+		timer = nil
+	end
+end
 
+local function add_highlight()
 	if vim.fn.getcmdtype() ~= ":" then
 		return
 	end
 
-	local start_line, end_line = get_range_number(text)
+	local text = vim.fn.getcmdline()
 
-	-- print('check values', text, start_line, end_line)
-	if start_line < 0 or end_line < 0 then
-		return
-	end
+	local function _on_time(text)
+		local start_line, end_line = get_range_number(text)
 
-	if end_line < start_line then
-		start_line, end_line = end_line, start_line
-		start_line = start_line - 1
-		end_line = end_line + 1
-	end
-
-	if cache[1] == start_line and cache[2] == end_line then
-		return
-	end
-
-	if cache[1] and cache[2] then
-		if cache[1] ~= start_line or cache[2] ~= end_line then
-			v.nvim_buf_clear_namespace(0, ns, cache[1], cache[2])
+		-- print('check values', text, start_line, end_line)
+		if start_line < 0 or end_line < 0 then
+			return
 		end
+
+		if end_line < start_line then
+			start_line, end_line = end_line, start_line
+			start_line = start_line - 1
+			end_line = end_line + 1
+		end
+
+		if cache[1] == start_line and cache[2] == end_line then
+			return
+		end
+
+		if cache[1] and cache[2] then
+			if cache[1] ~= start_line or cache[2] ~= end_line then
+				v.nvim_buf_clear_namespace(0, ns, cache[1], cache[2])
+			end
+		end
+		cache[1], cache[2] = start_line, end_line
+		vim.highlight.range(0, ns, opts.highlight, { start_line, 0 }, { end_line, 0 }, "V", false)
+		vim.cmd("redraw")
 	end
-	cache[1], cache[2] = start_line, end_line
-	vim.highlight.range(0, ns, opts.highlight, { start_line, 0 }, { end_line, 0 }, "V", false)
-	vim.cmd("redraw")
+
+	timer_close()
+	timer = vim.loop.new_timer()
+	timer:start(
+		30,
+	  	0,
+	    vim.schedule_wrap(function()
+	        timer_close()
+	      	_on_time(text)
+	    end)
+	)
 end
 
 local function setup(user_opts)
 	opts = vim.tbl_extend("force", opts, user_opts or {})
 	v.nvim_exec(
-		[[ 
+		[[
 		augroup Ranger
 		autocmd!
 		au CmdlineChanged * lua require('range-highlight').add_highlight()
